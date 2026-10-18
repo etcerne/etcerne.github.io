@@ -1,0 +1,1101 @@
+------------------------------------------------------------------------
+
+---
+title: "Final_sims"
+format: pdf
+editor: visual
+---
+
+```{r}
+source("/bigdata/rhome/etcn2024/Simulations/edited_functions.R")
+```
+
+## Functions
+
+#### Sigmoidal Generation
+
+```{r}
+F_test_single<-function(time_param,reps,noise_level,max,slopeParam,midpoint,h0){
+reps <- reps
+time  <- rep(seq(0, 300, by = time_param), times = reps)
+noise_level <- noise_level
+noise <- rnorm(length(time), 0, noise_level)
+reject_sigmoid<-0
+reject_double<-0
+
+
+
+intensity_raw <- (sigmoidalFitFormula_h0(
+  x          = time,
+  maximum    = max,
+  slopeParam = slopeParam,
+  midPoint   = midpoint,
+  h0=h0
+))
+
+intensity<-intensity_raw+noise
+
+dataInput <- data.frame(time = time, intensity = intensity)
+normalizedInput <- normalizeData(dataInput = dataInput)
+
+group_summary<-dataInput|>
+  group_by(time)|>
+  summarize(average = mean(intensity),.groups = 'drop')
+
+
+sigmoidalModel <- tryCatch(new_multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "sigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+
+
+sigmoidalModel <- tryCatch(parameterCalculation_h0(sigmoidalModel),error=function(e) NULL)
+
+doubleSigmoidalModel<-tryCatch(new_multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "doublesigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+doubleSigmoidalModel <- tryCatch(parameterCalculation_h0(doubleSigmoidalModel),error=function(e) NULL)
+
+if(!is.null(sigmoidalModel)){
+  sigmoid_fitted_values <- sigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = sigmoidalModel$maximum_Estimate,
+
+    slopeParam =
+      sigmoidalModel$slopeParam_Estimate,
+
+    midPoint =
+      sigmoidalModel$midPoint_Estimate,
+
+    h0=sigmoidalModel$h0_Estimate
+  )
+
+
+
+
+
+  sigmoid_residuals <-
+    dataInput$intensity - sigmoid_fitted_values
+
+  sigmoid_df<-length(time)-4
+
+
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-length(time)-1
+
+Flat_stat<-(((sum(flat_residuals^2)-sum(sigmoid_residuals^2)))/(flat_df-sigmoid_df))/(sum(sigmoid_residuals^2)/sigmoid_df)
+
+
+  
+
+F_Flat_sigmoid_p_value<-pf(Flat_stat,flat_df-sigmoid_df,sigmoid_df,lower.tail=FALSE)
+
+
+
+
+
+
+if(F_Flat_sigmoid_p_value>0.01){
+  reject_sigmoid<-1
+}
+
+
+# Second F-test
+
+total_error<-sum(sigmoid_residuals^2)
+
+avg_at_time_point<- data.frame(dataInput)|>
+                        group_by(time)|>
+                        mutate(average=mean(intensity))
+
+pure_error<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+
+group_summary<-dataInput|>
+  group_by(time)|>
+  summarize(average = mean(intensity),.groups = 'drop')
+
+  sigmoid_fitted_unique <- sigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = sigmoidalModel$maximum_Estimate,
+    slopeParam = sigmoidalModel$slopeParam_Estimate,
+    midPoint = sigmoidalModel$midPoint_Estimate,
+    h0 = sigmoidalModel$h0_Estimate
+  )
+
+
+  lack_of_fit_2<-reps*sum((sigmoid_fitted_unique-group_summary$average)^2)
+
+
+  lack_of_fit_df<- length(group_summary$time)-4 
+  pure_error_df<- length(time)-length(group_summary$time)
+
+  lack_of_fit_sigmoid_stat<-(lack_of_fit_2/lack_of_fit_df)/(pure_error/pure_error_df)
+  lack_of_fit_sigmoid_p_value<-pf(lack_of_fit_sigmoid_stat,lack_of_fit_df,pure_error_df, lower.tail=FALSE)
+
+
+
+
+if(lack_of_fit_sigmoid_p_value<0.05){
+  reject_sigmoid<-1
+}
+       sigmoidalModel.AIC<-sigmoidalModel$AIC
+}
+
+else{
+  maximum_Estimate<-NA
+slopeParam_Estimate<-NA
+midPoint_Estimate<-NA
+h0_Estimate<-NA
+Flat_stat<-NA
+F_Flat_sigmoid_p_value<-NA
+sigmoidalModel.AIC<-NA
+lack_of_fit_sigmoid_stat<-NA
+lack_of_fit_sigmoid_p_value<-NA
+reject_sigmoid<-1
+}
+
+if(!is.null(doubleSigmoidalModel)){
+ds_fitted_values<-doublesigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = doubleSigmoidalModel$maximum_y,
+
+    slope1Param =
+      doubleSigmoidalModel$slope1Param_Estimate,
+
+    midPoint1Param =
+      doubleSigmoidalModel$midPoint1Param_Estimate,
+
+    slope2Param=doubleSigmoidalModel$slope2Param_Estimate,
+
+    midPointDistanceParam = doubleSigmoidalModel$midPointDistanceParam_Estimate,
+
+    finalAsymptoteIntensityRatio=doubleSigmoidalModel$finalAsymptoteIntensityRatio_Estimate,
+
+    h0=doubleSigmoidalModel$startPoint_y)
+
+ds_residuals<-dataInput$intensity-ds_fitted_values
+
+ds_df<-length(time)-7
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-length(time)-1
+
+Flat_ds_stat<-(((sum(flat_residuals^2)-sum(ds_residuals^2)))/(flat_df-ds_df))/(sum(ds_residuals^2)/ds_df)
+  
+
+F_Flat_ds_p_value<-pf(Flat_ds_stat,flat_df-ds_df,ds_df,lower.tail=FALSE)
+
+
+if(F_Flat_ds_p_value>0.01){
+  reject_double<-1
+}
+
+# Second F-test
+
+total_error_ds<-sum(ds_residuals^2)
+
+avg_at_time_point_ds<- data.frame(dataInput)|>
+                        group_by(time)|>
+                        mutate(average=mean(intensity))
+
+pure_error_ds<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+
+  ds_fitted_unique <- doublesigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = doubleSigmoidalModel$maximum_Estimate,
+    slope1Param = doubleSigmoidalModel$slope1Param_Estimate,
+    midPoint1Param = doubleSigmoidalModel$midPoint1Param_Estimate,
+    slope2Param = doubleSigmoidalModel$slope2Param_Estimate,
+    midPointDistanceParam = doubleSigmoidalModel$midPointDistanceParam_Estimate,
+    finalAsymptoteIntensityRatio = doubleSigmoidalModel$finalAsymptoteIntensityRatio_Estimate,
+    h0 = doubleSigmoidalModel$h0_Estimate
+  )
+
+
+  lack_of_fit_2_ds<-reps*sum((ds_fitted_unique-group_summary$average)^2)
+
+  lack_of_fit_df_ds<-length(group_summary$time)-7
+  pure_error_df_ds<-length(time)-length(group_summary$time)
+
+  lack_of_fit_ds_stat<-(lack_of_fit_2_ds/lack_of_fit_df_ds)/(pure_error_ds/ pure_error_df_ds)
+  lack_of_fit_ds_p_value <- pf(lack_of_fit_ds_stat, lack_of_fit_df_ds, pure_error_df_ds, lower.tail = FALSE)
+
+
+if(lack_of_fit_ds_p_value<0.05){
+  reject_double<-1
+}
+doubleSigmoidalModel.AIC<-doubleSigmoidalModel$AIC
+
+}
+
+else{
+Flat_ds_stat<-NA
+F_Flat_ds_p_value<-NA
+lack_of_fit_ds_stat<-NA
+lack_of_fit_ds_p_value<-NA
+doubleSigmoidalModel.AIC<-NA
+reject_double<-1  
+}
+
+
+
+
+return(data.frame(time_param,reps,noise_level,max,slopeParam,midpoint,h0,
+Flat_stat,
+F_Flat_sigmoid_p_value,
+Flat_ds_stat,
+F_Flat_ds_p_value,
+sigmoidalModel.AIC,
+lack_of_fit_sigmoid_stat,
+lack_of_fit_sigmoid_p_value,
+lack_of_fit_ds_stat,
+lack_of_fit_ds_p_value,
+doubleSigmoidalModel.AIC,reject_sigmoid,reject_double))}
+
+```
+
+#### Double Sigmoidal Generation
+
+```{r}
+F_test_double<-function(time_param,reps,noise_level,max,slope1Param,midPoint1Param,slope2Param,midPointDistanceParam,finalAsymptoteIntensityRatio,h0){
+reps <- reps
+time  <- rep(seq(0, 300, by = time_param), times = reps)
+noise_level <- noise_level
+noise <- rnorm(length(time), 0, noise_level)
+
+
+
+intensity_raw <- doublesigmoidalFitFormula_h0(
+    x = time,
+    maximum = max,
+
+    slope1Param =
+      slope1Param,
+
+    midPoint1Param =
+      midPoint1Param,
+
+    slope2Param=slope2Param,
+
+    midPointDistanceParam = midPointDistanceParam,
+
+    finalAsymptoteIntensityRatio=finalAsymptoteIntensityRatio,
+
+    h0=h0)
+
+intensity<-intensity_raw+noise
+
+dataInput <- data.frame(time = time, intensity = intensity)
+normalizedInput <- normalizeData(dataInput = dataInput)
+
+group_summary<-dataInput |>
+  group_by(time)|>
+  summarize(average = mean(intensity),.groups = 'drop')
+
+
+sigmoidalModel <- tryCatch(new_multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "sigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+
+
+sigmoidalModel <- tryCatch(parameterCalculation_h0(sigmoidalModel),error=function(e) NULL)
+
+doubleSigmoidalModel<-tryCatch(new_multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "doublesigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+doubleSigmoidalModel <- tryCatch(parameterCalculation_h0(doubleSigmoidalModel),error=function(e) NULL)
+
+if(!is.null(sigmoidalModel)){
+  sigmoid_fitted_values <- sigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = sigmoidalModel$maximum_Estimate,
+
+    slopeParam =
+      sigmoidalModel$slopeParam_Estimate,
+
+    midPoint =
+      sigmoidalModel$midPoint_Estimate,
+
+    h0=sigmoidalModel$h0_Estimate
+  )
+
+  sigmoid_residuals <-
+    dataInput$intensity - sigmoid_fitted_values
+
+  sigmoid_df<-length(time)-4
+
+
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-length(time)-1
+
+Flat_stat<-(((sum(flat_residuals^2)-sum(sigmoid_residuals^2)))/(flat_df-sigmoid_df))/(sum(sigmoid_residuals^2)/sigmoid_df)
+
+
+  
+
+F_Flat_sigmoid_p_value<-pf(Flat_stat,flat_df-sigmoid_df,sigmoid_df,lower.tail=FALSE)
+
+
+
+
+
+
+
+
+
+# Second F-test
+
+total_error<-sum(sigmoid_residuals^2)
+
+avg_at_time_point<- data.frame(dataInput)|>
+                        group_by(time)|>
+                        mutate(average=mean(intensity))
+
+pure_error<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+group_summary<-dataInput |>
+  group_by(time)|>
+  summarize(average = mean(intensity),.groups = 'drop')
+
+  sigmoid_fitted_unique<-sigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = sigmoidalModel$maximum_Estimate,
+    slopeParam = sigmoidalModel$slopeParam_Estimate,
+    midPoint = sigmoidalModel$midPoint_Estimate,
+    h0 = sigmoidalModel$h0_Estimate
+  )
+
+  lack_of_fit_2<-reps*sum((sigmoid_fitted_unique-group_summary$average)^2)
+
+
+  lack_of_fit_df<-length(group_summary$time)-4
+  pure_error_df<-length(time)-length(group_summary$time)
+
+  lack_of_fit_sigmoid_stat<-(lack_of_fit_2/lack_of_fit_df)/(pure_error/pure_error_df)
+  lack_of_fit_sigmoid_p_value<-pf(lack_of_fit_sigmoid_stat, lack_of_fit_df, pure_error_df, lower.tail = FALSE)
+
+max_estimate<-sigmoidalModel$maximum_Estimate
+slopeParam_estimate<-sigmoidalModel$slopeParam_Estimate
+midpoint_estimate<-sigmoidalModel$midPoint_Estimate
+ho_estimate<-sigmoidalModel$h0_Estimate
+
+
+       sigmoidalModel.AIC<-sigmoidalModel$AIC
+}
+
+else{
+ maximum_estimate<-NA
+slopeParam_estimate<-NA
+midpoint_estimate<-NA
+h0_estimate<-NA
+Flat_stat<-NA
+F_Flat_sigmoid_p_value<-NA
+sigmoidalModel.AIC<-NA
+lack_of_fit_sigmoid_stat<-NA
+lack_of_fit_sigmoid_p_value<-NA
+}
+
+if(!is.null(doubleSigmoidalModel)){
+ds_fitted_values<-doublesigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = doubleSigmoidalModel$maximum_y,
+
+    slope1Param =
+      doubleSigmoidalModel$slope1Param_Estimate,
+
+    midPoint1Param =
+      doubleSigmoidalModel$midPoint1Param_Estimate,
+
+    slope2Param=doubleSigmoidalModel$slope2Param_Estimate,
+
+    midPointDistanceParam = doubleSigmoidalModel$midPointDistanceParam_Estimate,
+
+    finalAsymptoteIntensityRatio=doubleSigmoidalModel$finalAsymptoteIntensityRatio_Estimate,
+
+    h0=doubleSigmoidalModel$startPoint_y)
+
+ds_residuals<-dataInput$intensity-ds_fitted_values
+
+ds_df<-length(time)-7
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-length(time)-1
+
+Flat_ds_stat<-(((sum(flat_residuals^2)-sum(ds_residuals^2)))/(flat_df-ds_df))/(sum(ds_residuals^2)/ds_df)
+  
+
+F_Flat_ds_p_value<-pf(Flat_ds_stat,flat_df-ds_df,ds_df,lower.tail=FALSE)
+
+
+
+# Second F-test
+
+total_error_ds<-sum(ds_residuals^2)
+
+avg_at_time_point_ds<- data.frame(dataInput)|>
+                        group_by(time)|>
+                        mutate(average=mean(intensity))
+
+
+pure_error_ds<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+
+  ds_fitted_unique<-doublesigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = doubleSigmoidalModel$maximum_Estimate,
+    slope1Param = doubleSigmoidalModel$slope1Param_Estimate,
+    midPoint1Param = doubleSigmoidalModel$midPoint1Param_Estimate,
+    slope2Param = doubleSigmoidalModel$slope2Param_Estimate,
+    midPointDistanceParam = doubleSigmoidalModel$midPointDistanceParam_Estimate,
+    finalAsymptoteIntensityRatio = doubleSigmoidalModel$finalAsymptoteIntensityRatio_Estimate,
+    h0 = doubleSigmoidalModel$h0_Estimate
+  )
+
+  lack_of_fit_2_ds<-reps*sum((ds_fitted_unique-group_summary$average)^2)
+
+
+  lack_of_fit_df_ds<-length(group_summary$time)-7 
+  pure_error_df_ds<-length(time)-length(group_summary$time)
+
+
+  lack_of_fit_ds_stat<-(lack_of_fit_2_ds/lack_of_fit_df_ds)/(pure_error_ds/pure_error_df_ds)
+  lack_of_fit_ds_p_value<-pf(lack_of_fit_ds_stat,lack_of_fit_df_ds,pure_error_df_ds,lower.tail = FALSE)
+
+
+
+
+ maximum_estimate <-doubleSigmoidalModel$maximum_y
+
+    slope1Param_estimate<-
+      doubleSigmoidalModel$slope1Param_Estimate
+
+    midPoint1Param_estimate<-
+      doubleSigmoidalModel$midPoint1Param_Estimate
+
+    slope2Param_estimate<-doubleSigmoidalModel$slope2Param_Estimate
+
+    midPointDistanceParam_estimate<-doubleSigmoidalModel$midPointDistanceParam_Estimate
+
+    finalAsymptoteIntensityRatio_estimate<-doubleSigmoidalModel$finalAsymptoteIntensityRatio_Estimate
+
+    h0_estimate<-doubleSigmoidalModel$startPoint_y
+
+
+
+doubleSigmoidalModel.AIC<-doubleSigmoidalModel$AIC
+
+}
+
+else{
+Flat_ds_stat<-NA
+F_Flat_ds_p_value<-NA
+lack_of_fit_ds_stat<-NA
+lack_of_fit_ds_p_value<-NA
+doubleSigmoidalModel.AIC<-NA
+maximum_estimate<-NA
+slope1Param_estimate<-NA
+midPoint1Param_estimate<-NA
+slope2Param_estimate<-NA
+midPointDistanceParam_estimate<-NA
+finalAsymptoteIntensityRatio_estimate<-NA
+h0_estimate<-NA
+}
+
+
+
+
+return(data.frame(time_param,reps,noise_level,max,slope1Param,midPoint1Param,slope2Param,midPointDistanceParam,finalAsymptoteIntensityRatio,h0,
+maximum_estimate,slope1Param_estimate,midPoint1Param_estimate,slope2Param_estimate,midPointDistanceParam_estimate,finalAsymptoteIntensityRatio_estimate,h0_estimate,
+Flat_stat,
+F_Flat_sigmoid_p_value,
+Flat_ds_stat,
+F_Flat_ds_p_value,
+sigmoidalModel.AIC,
+lack_of_fit_sigmoid_stat,
+lack_of_fit_sigmoid_p_value,
+lack_of_fit_ds_stat,
+lack_of_fit_ds_p_value,
+doubleSigmoidalModel.AIC))}
+```
+
+#### Quadratic Generation
+
+```{r}
+F_test_quadratic<-function(time_param,reps,noise_level){
+reps <- reps
+time  <- rep(seq(0, 300, by = time_param), times = reps)
+noise_level <- noise_level
+noise <- rnorm(length(time), 0, noise_level)
+reject_sigmoid<-0
+reject_double<-0
+
+
+
+intensity_raw <- (time-150)^2 +60000
+
+intensity<-intensity_raw+noise
+
+dataInput <- data.frame(time = time, intensity = intensity)
+normalizedInput <- normalizeData(dataInput = dataInput)
+
+group_summary<-dataInput|>
+  group_by(time)|>
+  summarize(average = mean(intensity),.groups = 'drop')
+
+
+sigmoidalModel <- tryCatch(new_multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "sigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+
+
+sigmoidalModel <- tryCatch(parameterCalculation_h0(sigmoidalModel),error=function(e) NULL)
+
+doubleSigmoidalModel<-tryCatch(new_multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "doublesigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+doubleSigmoidalModel <- tryCatch(parameterCalculation_h0(doubleSigmoidalModel),error=function(e) NULL)
+
+if(!is.null(sigmoidalModel)){
+  sigmoid_fitted_values <- sigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = sigmoidalModel$maximum_Estimate,
+
+    slopeParam =
+      sigmoidalModel$slopeParam_Estimate,
+
+    midPoint =
+      sigmoidalModel$midPoint_Estimate,
+
+    h0=sigmoidalModel$h0_Estimate
+  )
+
+
+
+
+
+  sigmoid_residuals <-
+    dataInput$intensity - sigmoid_fitted_values
+
+  sigmoid_df<-length(time)-4
+
+
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-length(time)-1
+
+Flat_stat<-(((sum(flat_residuals^2)-sum(sigmoid_residuals^2)))/(flat_df-sigmoid_df))/(sum(sigmoid_residuals^2)/sigmoid_df)
+
+
+  
+
+F_Flat_sigmoid_p_value<-pf(Flat_stat,flat_df-sigmoid_df,sigmoid_df,lower.tail=FALSE)
+
+
+
+
+
+
+if(F_Flat_sigmoid_p_value>0.01){
+  reject_sigmoid<-1
+}
+
+
+# Second F-test
+
+total_error<-sum(sigmoid_residuals^2)
+
+avg_at_time_point<- data.frame(dataInput)|>
+                        group_by(time)|>
+                        mutate(average=mean(intensity))
+
+pure_error<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+
+group_summary<-dataInput|>
+  group_by(time)|>
+  summarize(average = mean(intensity),.groups = 'drop')
+
+  sigmoid_fitted_unique <- sigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = sigmoidalModel$maximum_Estimate,
+    slopeParam = sigmoidalModel$slopeParam_Estimate,
+    midPoint = sigmoidalModel$midPoint_Estimate,
+    h0 = sigmoidalModel$h0_Estimate
+  )
+
+
+  lack_of_fit_2<-reps*sum((sigmoid_fitted_unique-group_summary$average)^2)
+
+
+  lack_of_fit_df<- length(group_summary$time)-4 
+  pure_error_df<- length(time)-length(group_summary$time)
+
+  lack_of_fit_sigmoid_stat<-(lack_of_fit_2/lack_of_fit_df)/(pure_error/pure_error_df)
+  lack_of_fit_sigmoid_p_value<-pf(lack_of_fit_sigmoid_stat,lack_of_fit_df,pure_error_df, lower.tail=FALSE)
+
+
+
+
+if(lack_of_fit_sigmoid_p_value<0.05){
+  reject_sigmoid<-1
+}
+       sigmoidalModel.AIC<-sigmoidalModel$AIC
+}
+
+else{
+  maximum_Estimate<-NA
+slopeParam_Estimate<-NA
+midPoint_Estimate<-NA
+h0_Estimate<-NA
+Flat_stat<-NA
+F_Flat_sigmoid_p_value<-NA
+sigmoidalModel.AIC<-NA
+lack_of_fit_sigmoid_stat<-NA
+lack_of_fit_sigmoid_p_value<-NA
+reject_sigmoid<-1
+}
+
+if(!is.null(doubleSigmoidalModel)){
+ds_fitted_values<-doublesigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = doubleSigmoidalModel$maximum_y,
+
+    slope1Param =
+      doubleSigmoidalModel$slope1Param_Estimate,
+
+    midPoint1Param =
+      doubleSigmoidalModel$midPoint1Param_Estimate,
+
+    slope2Param=doubleSigmoidalModel$slope2Param_Estimate,
+
+    midPointDistanceParam = doubleSigmoidalModel$midPointDistanceParam_Estimate,
+
+    finalAsymptoteIntensityRatio=doubleSigmoidalModel$finalAsymptoteIntensityRatio_Estimate,
+
+    h0=doubleSigmoidalModel$startPoint_y)
+
+ds_residuals<-dataInput$intensity-ds_fitted_values
+
+ds_df<-length(time)-7
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-length(time)-1
+
+Flat_ds_stat<-(((sum(flat_residuals^2)-sum(ds_residuals^2)))/(flat_df-ds_df))/(sum(ds_residuals^2)/ds_df)
+  
+
+F_Flat_ds_p_value<-pf(Flat_ds_stat,flat_df-ds_df,ds_df,lower.tail=FALSE)
+
+
+if(F_Flat_ds_p_value>0.01){
+  reject_double<-1
+}
+
+# Second F-test
+
+total_error_ds<-sum(ds_residuals^2)
+
+avg_at_time_point_ds<- data.frame(dataInput)|>
+                        group_by(time)|>
+                        mutate(average=mean(intensity))
+
+pure_error_ds<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+
+  ds_fitted_unique <- doublesigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = doubleSigmoidalModel$maximum_Estimate,
+    slope1Param = doubleSigmoidalModel$slope1Param_Estimate,
+    midPoint1Param = doubleSigmoidalModel$midPoint1Param_Estimate,
+    slope2Param = doubleSigmoidalModel$slope2Param_Estimate,
+    midPointDistanceParam = doubleSigmoidalModel$midPointDistanceParam_Estimate,
+    finalAsymptoteIntensityRatio = doubleSigmoidalModel$finalAsymptoteIntensityRatio_Estimate,
+    h0 = doubleSigmoidalModel$h0_Estimate
+  )
+
+
+  lack_of_fit_2_ds<-reps*sum((ds_fitted_unique-group_summary$average)^2)
+
+  lack_of_fit_df_ds<-length(group_summary$time)-7
+  pure_error_df_ds<-length(time)-length(group_summary$time)
+
+  lack_of_fit_ds_stat<-(lack_of_fit_2_ds/lack_of_fit_df_ds)/(pure_error_ds/ pure_error_df_ds)
+  lack_of_fit_ds_p_value <- pf(lack_of_fit_ds_stat, lack_of_fit_df_ds, pure_error_df_ds, lower.tail = FALSE)
+
+
+if(lack_of_fit_ds_p_value<0.05){
+  reject_double<-1
+}
+doubleSigmoidalModel.AIC<-doubleSigmoidalModel$AIC
+
+}
+
+else{
+Flat_ds_stat<-NA
+F_Flat_ds_p_value<-NA
+lack_of_fit_ds_stat<-NA
+lack_of_fit_ds_p_value<-NA
+doubleSigmoidalModel.AIC<-NA
+reject_double<-1  
+}
+
+
+
+
+return(data.frame(time_param,reps,noise_level,
+Flat_stat,
+F_Flat_sigmoid_p_value,
+Flat_ds_stat,
+F_Flat_ds_p_value,
+sigmoidalModel.AIC,
+lack_of_fit_sigmoid_stat,
+lack_of_fit_sigmoid_p_value,
+lack_of_fit_ds_stat,
+lack_of_fit_ds_p_value,
+doubleSigmoidalModel.AIC,reject_sigmoid,reject_double))}
+
+```
+
+## 1. Double Sigmoidal
+
+Generating data from double sigmoidal models with many different parameter combinations.
+
+```{r}
+simulation<-function(){
+results<-expand_grid(time_param=c(15,20,30),reps=c(3,5,7),
+                     noise_level=c(100,250,500,1000),
+                     max=1930,
+                     slope1Param=c(0.03,0.05),
+                     midPoint1Param=c(100,150),
+                     slope2Param=c(0.01,0.03),
+                     midPointDistanceParam=c(80,120),
+                     finalAsymptoteIntensityRatio=c(0.3,0.6),
+                     h0=700)|> 
+pmap(F_test_double)|> list_rbind()
+return(data.frame(results))
+}
+```
+
+```{r}
+tic()
+set.seed(106)
+plan(multisession,workers=50)
+repeats<-100
+final_results_106<-future_map(1:repeats,~simulation(),.options = furrr_options(seed=TRUE))|> list_rbind()
+toc()
+```
+
+```{r}
+final_results_106$reject_sigmoid_test_1<-ifelse(final_results_106$F_Flat_sigmoid_p_value>0.01,1,0)
+final_results_106$reject_ds_test_1<-ifelse(final_results_106$F_Flat_ds_p_value>0.01,1,0)
+final_results_106$reject_sigmoid_test_2<-ifelse(final_results_106$lack_of_fit_sigmoid_p_value<0.05,1,0)
+final_results_106$reject_ds_test_2<-ifelse(final_results_106$lack_of_fit_ds_p_value<0.05,1,0)
+final_results_106$reject_sigmoid<-ifelse(final_results_106$reject_sigmoid_test_1==1|final_results_106$reject_sigmoid_test_2==1,1,0)
+final_results_106$reject_double<-ifelse(final_results_106$reject_ds_test_1==1|final_results_106$reject_ds_test_2==1,1,0)
+
+final_results_106<-na.omit(final_results_106)
+totals_106<-data.frame(reject_sigmoid=
+                       final_results_106|>
+                       filter(reject_sigmoid==1)|>
+                       nrow()/nrow(final_results_106),
+                     
+                     reject_double=final_results_106|>
+                       filter(reject_double==1)|>
+                       nrow()/nrow(final_results_106),
+                     
+                     AIC_sigmoid_reject=final_results_106|>
+                       filter(sigmoidalModel.AIC>-10)|>
+                       nrow()/nrow(final_results_106),
+                     
+                     AIC_double_reject=final_results_106|>
+                       filter(doubleSigmoidalModel.AIC>-10)|>
+                       nrow()/nrow(final_results_106),
+                     
+                     sigmoid_step1_reject=final_results_106|>
+                       filter(reject_sigmoid_test_1==1)|>
+                       nrow()/nrow(final_results_106),
+                     
+                     sigmoid_step2_reject=final_results_106|>
+                       filter(reject_sigmoid_test_2==1)|>
+                       nrow()/nrow(final_results_106),
+                     
+                     ds_step1_reject=final_results_106|>
+                       filter(reject_ds_test_1==1)|>
+                       nrow()/nrow(final_results_106),
+                     
+                     ds_step2_reject=final_results_106|>
+                       filter(reject_ds_test_2==1)|>
+                       nrow()/nrow(final_results_106)
+)
+
+
+summary_table_106<-final_results_106|>
+  mutate(AIC_sigmoid_reject=ifelse(final_results_106$sigmoidalModel.AIC>-10,1,0),AIC_double_reject=ifelse(final_results_106$doubleSigmoidalModel.AIC>-10,1,0))|>
+  group_by(noise_level,reps,time_param)|>
+  summarize(reject_sigmoid=mean(reject_sigmoid),AIC_sigmoid_reject=mean(AIC_sigmoid_reject),
+            reject_double=mean(reject_double), AIC_double_reject=mean(AIC_double_reject))
+
+
+```
+
+```{r}
+double<-pivot_longer(summary_table_106,cols=c(reject_double,AIC_double_reject),names_to="test",values_to="rejection_rate")
+ggplot(double,aes(x=reps,y=rejection_rate,color=test))+
+  geom_point(position=position_dodge(width=1.2))+
+  labs(title='generation=double sigmoid, rejection_rate=double_sigmoid')+
+  theme_minimal()+
+  
+ 
+  facet_grid(time_param~noise_level,labeller=labeller(noise_level=c('100'= 'Noise 100','250'= 'Noise 250','500'='Noise 500','1000'= 'Noise 1000'),time_param=c('15'='21 Time Points','20'='16 Time Points','30'='11 Time Points')))
+```
+
+```{r}
+double_2<-pivot_longer(summary_table_106,cols=c(reject_sigmoid,AIC_sigmoid_reject),names_to="test",values_to="rejection_rate")
+ggplot(double_2,aes(x=reps,y=rejection_rate,color=test))+
+  geom_point(position=position_dodge(width=1.2))+
+  labs(title='generation=double sigmoid, rejection_rate=sigmoid')+
+  theme_minimal()+
+  
+ 
+  facet_grid(time_param~noise_level,labeller=labeller(noise_level=c('100'= 'Noise 100','250'= 'Noise 250','500'='Noise 500','1000'= 'Noise 1000'),time_param=c('15'='21 Time Points','20'='16 Time Points','30'='11 Time Points')))
+```
+
+## 2. Sigmoid simulation
+
+Generating data from sigmoidal models with many different parameter combinations.
+
+```{r}
+simulation<-function(){
+results<-expand_grid(time_param=c(15,20,30),reps=c(3,5,7),
+                     noise_level=c(50,100,200,300,400,500),
+                      max=c(1930),
+                      slopeParam=c(0.01,0.03,0.05),
+                      midpoint=c(40,80,160,200),
+                      h0=1500)|> 
+pmap(F_test_single)|> list_rbind()
+return(data.frame(results))}
+```
+
+```{r}
+tic()
+set.seed(115)
+plan(multisession,workers=100)
+repeats<-100
+final_results_115<-future_map(1:repeats,~simulation(),.options = furrr_options(seed=TRUE))|> list_rbind()
+toc()
+```
+
+```{r}
+final_results_115$reject_sigmoid_test_1<-ifelse(final_results_115$F_Flat_sigmoid_p_value>0.01,1,0)
+final_results_115$reject_ds_test_1<-ifelse(final_results_115$F_Flat_ds_p_value>0.01,1,0)
+final_results_115$reject_sigmoid_test_2<-ifelse(final_results_115$lack_of_fit_sigmoid_p_value<0.05,1,0)
+final_results_115$reject_ds_test_2<-ifelse(final_results_115$lack_of_fit_ds_p_value<0.05,1,0)
+final_results_115$reject_sigmoid<-ifelse(final_results_115$reject_sigmoid_test_1==1|final_results_115$reject_sigmoid_test_2==1,1,0)
+final_results_115$reject_double<-ifelse(final_results_115$reject_ds_test_1==1|final_results_115$reject_ds_test_2==1,1,0)
+
+final_results_115<-na.omit(final_results_115)
+totals_115<-data.frame(reject_sigmoid=
+                       final_results_115|>
+                       filter(reject_sigmoid==1)|>
+                       nrow()/nrow(final_results_115),
+                     
+                     reject_double=final_results_115|>
+                       filter(reject_double==1)|>
+                       nrow()/nrow(final_results_115),
+                     
+                     AIC_sigmoid_reject=final_results_115|>
+                       filter(sigmoidalModel.AIC>-10)|>
+                       nrow()/nrow(final_results_115),
+                     
+                     AIC_double_reject=final_results_115|>
+                       filter(doubleSigmoidalModel.AIC>-10)|>
+                       nrow()/nrow(final_results_115),
+                     
+                     sigmoid_step1_reject=final_results_115|>
+                       filter(reject_sigmoid_test_1==1)|>
+                       nrow()/nrow(final_results_115),
+                     
+                     sigmoid_step2_reject=final_results_115|>
+                       filter(reject_sigmoid_test_2==1)|>
+                       nrow()/nrow(final_results_115),
+                     
+                     ds_step1_reject=final_results_115|>
+                       filter(reject_ds_test_1==1)|>
+                       nrow()/nrow(final_results_115),
+                     
+                     ds_step2_reject=final_results_115|>
+                       filter(reject_ds_test_2==1)|>
+                       nrow()/nrow(final_results_115)
+)
+
+
+summary_table_115<-final_results_115|>
+  mutate(AIC_sigmoid_reject=ifelse(final_results_115$sigmoidalModel.AIC>-10,1,0),AIC_double_reject=ifelse(final_results_115$doubleSigmoidalModel.AIC>-10,1,0))|>
+  group_by(noise_level,reps,time_param)|>
+  summarize(reject_sigmoid=mean(reject_sigmoid),AIC_sigmoid_reject=mean(AIC_sigmoid_reject),
+            reject_double=mean(reject_double), AIC_double_reject=mean(AIC_double_reject))
+
+
+```
+
+```{r}
+wider<-pivot_longer(summary_table_115,cols=c(reject_sigmoid,AIC_sigmoid_reject),names_to="test",values_to="rejection_rate")
+ggplot(wider,aes(x=reps,y=rejection_rate,color=test))+
+  geom_point(position=position_dodge(width=1.2))+
+  labs(title='generation=sigmoid, rejection_rate=sigmoid')+
+  theme_minimal()+
+ 
+  facet_grid(time_param~noise_level,labeller=labeller(noise_level=c('50'= 'Noise 50','100'= 'Noise 100','200'= 'Noise 200','300'= 'Noise 300','400'= 'Noise 400','500'= 'Noise 500'),time_param=c('15'='21 Time Points','20'='16 Time Points','30'='11 Time Points')))
+```
+
+```{r}
+wider_2<-pivot_longer(summary_table_115,cols=c(reject_double,AIC_double_reject),names_to="test",values_to="rejection_rate")
+ggplot(wider_2,aes(x=reps,y=rejection_rate,color=test))+
+  geom_point(position=position_dodge(width=1.2))+
+  labs(title='generation=sigmoid, rejection_rate=double sigmoid')+
+  theme_minimal()+
+ 
+  facet_grid(time_param~noise_level,labeller=labeller(noise_level=c('50'= 'Noise 50','100'= 'Noise 100','200'= 'Noise 200','300'= 'Noise 300','400'= 'Noise 400','500'= 'Noise 500'),time_param=c('15'='21 Time Points','20'='16 Time Points','30'='11 Time Points')))
+```
+
+## 3. Quadratic Simulation
+
+Generating data from a quadratic, varying the noise level and the number of time points and replicates.
+
+```{r}
+simulation<-function(){
+results<-expand_grid(time_param=c(15,20,30),reps=c(3,5,7),
+                     noise_level=c(1000,5000,10000,20000),
+                     )|> 
+pmap(F_test_quadratic)|> list_rbind()
+return(data.frame(results))}
+```
+
+```{r}
+tic()
+set.seed(127)
+plan(multisession,workers=100)
+repeats<-100
+final_results_127<-future_map(1:repeats,~simulation(),.options = furrr_options(seed=TRUE))|> list_rbind()
+toc()
+```
+
+```{r}
+final_results_127$reject_sigmoid_test_1<-ifelse(final_results_127$F_Flat_sigmoid_p_value>0.01,1,0)
+final_results_127$reject_ds_test_1<-ifelse(final_results_127$F_Flat_ds_p_value>0.01,1,0)
+final_results_127$reject_sigmoid_test_2<-ifelse(final_results_127$lack_of_fit_sigmoid_p_value<0.05,1,0)
+final_results_127$reject_ds_test_2<-ifelse(final_results_127$lack_of_fit_ds_p_value<0.05,1,0)
+final_results_127$reject_sigmoid<-ifelse(final_results_127$reject_sigmoid_test_1==1|final_results_127$reject_sigmoid_test_2==1,1,0)
+final_results_127$reject_double<-ifelse(final_results_127$reject_ds_test_1==1|final_results_127$reject_ds_test_2==1,1,0)
+
+final_results_127<-na.omit(final_results_127)
+totals_127<-data.frame(reject_sigmoid=
+                       final_results_127|>
+                       filter(reject_sigmoid==1)|>
+                       nrow()/nrow(final_results_127),
+                     
+                     reject_double=final_results_127|>
+                       filter(reject_double==1)|>
+                       nrow()/nrow(final_results_127),
+                     
+                     AIC_sigmoid_reject=final_results_127|>
+                       filter(sigmoidalModel.AIC>-10)|>
+                       nrow()/nrow(final_results_127),
+                     
+                     AIC_double_reject=final_results_127|>
+                       filter(doubleSigmoidalModel.AIC>-10)|>
+                       nrow()/nrow(final_results_127),
+                     
+                     sigmoid_step1_reject=final_results_127|>
+                       filter(reject_sigmoid_test_1==1)|>
+                       nrow()/nrow(final_results_127),
+                     
+                     sigmoid_step2_reject=final_results_127|>
+                       filter(reject_sigmoid_test_2==1)|>
+                       nrow()/nrow(final_results_127),
+                     
+                     ds_step1_reject=final_results_127|>
+                       filter(reject_ds_test_1==1)|>
+                       nrow()/nrow(final_results_127),
+                     
+                     ds_step2_reject=final_results_127|>
+                       filter(reject_ds_test_2==1)|>
+                       nrow()/nrow(final_results_127)
+)
+
+
+summary_table_127<-final_results_127|>
+  mutate(AIC_sigmoid_reject=ifelse(final_results_127$sigmoidalModel.AIC>-10,1,0),AIC_double_reject=ifelse(final_results_127$doubleSigmoidalModel.AIC>-10,1,0))|>
+  group_by(noise_level,reps,time_param)|>
+  summarize(reject_sigmoid=mean(reject_sigmoid),AIC_sigmoid_reject=mean(AIC_sigmoid_reject),
+            reject_double=mean(reject_double), AIC_double_reject=mean(AIC_double_reject))
+
+
+```
+
+```{r}
+quadratic<-pivot_longer(summary_table_127,cols=c(reject_sigmoid,AIC_sigmoid_reject),names_to="test",values_to="rejection_rate")
+ggplot(quadratic,aes(x=reps,y=rejection_rate,color=test))+
+  geom_point(position=position_dodge(width=1.2))+
+  labs(title='generation=quadratic, rejection_rate=sigmoid')+
+  theme_minimal()+
+ 
+  facet_grid(time_param~noise_level,labeller=labeller(noise_level=c('1000'= 'Noise 1000','5000'= 'Noise 5000','10000'= 'Noise 10000','20000'= 'Noise 20000'),time_param=c('15'='21 Time Points','20'='16 Time Points','30'='11 Time Points')))
+```
