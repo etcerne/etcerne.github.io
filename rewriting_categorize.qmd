@@ -1,0 +1,982 @@
+---
+title: "Untitled"
+format: html
+---
+
+# New categorize
+```{r}
+categorize_h0_new <- function (dataInput,parameterVectorSigmoidal, parameterVectorDoubleSigmoidal, 
+    threshold_intensity_range = 0.1, threshold_minimum_for_intensity_maximum = 0.3, 
+    threshold_bonus_sigmoidal_AIC = 0, threshold_sm_tmax_IntensityRatio = 0.85, 
+    threshold_dsm_tmax_IntensityRatio = 0.75, threshold_AIC = -10, 
+    threshold_t0_max_int = 1e+10, showDetails = FALSE) 
+{
+    decisionList <- list()
+
+    if ((!is.na(parameterVectorSigmoidal$dataInputName)) & (!is.na(parameterVectorDoubleSigmoidal$dataInputName))) {
+        decisionList$test.name <- parameterVectorSigmoidal$dataInputName == 
+            parameterVectorDoubleSigmoidal$dataInputName
+        decisionList$dataInputName <- as.vector(parameterVectorSigmoidal$dataInputName)
+    }
+else {
+        decisionList$test.name <- NA
+        decisionList$dataInputName <- NA
+    }
+    
+
+# F-tests for sigmoidal
+
+F_reject_sigmoid<-0
+F_reject_double<-0
+sigmoid_classic_fail<-0
+sigmoid_lack_of_fit_fail<-0
+double_classic_fail<-0
+double_lack_of_fit_fail<-0
+sigmoid_AIC_fail<-0
+double_AIC_fail<-0
+
+
+group_summary<-dataInput|>
+  group_by(time)|>
+  summarise(average = mean(intensity),reps = n(),.groups = 'drop')
+
+    if(!is.null(parameterVectorSigmoidal)){
+
+        decisionList$test.name <- parameterVectorSigmoidal$dataInputName == 
+            parameterVectorDoubleSigmoidal$dataInputName
+        decisionList$dataInputName <- as.vector(parameterVectorSigmoidal$dataInputName)
+
+
+  sigmoid_fitted_values <- sigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = parameterVectorSigmoidal$maximum_Estimate,
+
+    slopeParam =
+      parameterVectorSigmoidal$slopeParam_Estimate,
+
+    midPoint =
+      parameterVectorSigmoidal$midPoint_Estimate,
+
+    h0=parameterVectorSigmoidal$h0_Estimate
+  )
+
+
+
+
+
+  sigmoid_residuals <-
+    dataInput$intensity - sigmoid_fitted_values
+
+  sigmoid_df<-nrow(dataInput)-4
+
+
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-nrow(dataInput)-1
+
+Flat_sigmoid_stat<-(((sum(flat_residuals^2)-sum(sigmoid_residuals^2)))/(flat_df-sigmoid_df))/(sum(sigmoid_residuals^2)/sigmoid_df)
+
+F_Flat_sigmoid_p_value<-pf(Flat_sigmoid_stat,flat_df-sigmoid_df,sigmoid_df,lower.tail=FALSE)
+
+if(F_Flat_sigmoid_p_value>0.01){
+  F_reject_sigmoid<-1
+  sigmoid_classic_fail<-1
+}
+
+total_error<-sum(sigmoid_residuals^2)
+
+pure_error<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+alternative_lack_of_fit<-total_error-pure_error
+
+
+  sigmoid_fitted_unique <- sigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = parameterVectorSigmoidal$maximum_Estimate,
+    slopeParam = parameterVectorSigmoidal$slopeParam_Estimate,
+    midPoint = parameterVectorSigmoidal$midPoint_Estimate,
+    h0 = parameterVectorSigmoidal$h0_Estimate
+  )
+
+
+  lack_of_fit_2<-sum(group_summary$reps*(sigmoid_fitted_unique-group_summary$average)^2)
+
+
+  lack_of_fit_df<- length(group_summary$time)-4 
+  pure_error_df<- nrow(dataInput)-length(group_summary$time)
+
+  lack_of_fit_sigmoid_stat<-(lack_of_fit_2/lack_of_fit_df)/(pure_error/pure_error_df)
+  lack_of_fit_sigmoid_p_value<-pf(lack_of_fit_sigmoid_stat,lack_of_fit_df,pure_error_df, lower.tail=FALSE)
+
+
+
+
+if(lack_of_fit_sigmoid_p_value<0.05){
+  F_reject_sigmoid<-1
+  sigmoid_lack_of_fit_fail<-1
+}
+
+if(parameterVectorSigmoidal$AIC>5){
+sigmoid_AIC_fail<-1
+}
+
+sigmoidalModel.AIC<-parameterVectorSigmoidal$AIC
+sigmoid_max_estimate<-parameterVectorSigmoidal$maximum_Estimate
+sigmoid_slopeParam_estimate<-parameterVectorSigmoidal$slopeParam_Estimate
+sigmoid_midpoint_estimate<-parameterVectorSigmoidal$midPoint_Estimate
+sigmoid_h0_estimate<-parameterVectorSigmoidal$h0_Estimate
+
+decisionList$Flat_sigmoid_stat <- Flat_sigmoid_stat
+decisionList$F_Flat_sigmoid_p_value <- F_Flat_sigmoid_p_value
+
+
+decisionList$lack_of_fit_sigmoid_stat <- lack_of_fit_sigmoid_stat
+decisionList$lack_of_fit_sigmoid_p_value <- lack_of_fit_sigmoid_p_value
+
+decisionList$F_reject_sigmoid <- F_reject_sigmoid
+
+decisionList$sigmoid_classic_fail <- sigmoid_classic_fail
+decisionList$sigmoid_lack_of_fit_fail <- sigmoid_lack_of_fit_fail
+
+decisionList$sigmoid_AIC_fail <- sigmoid_AIC_fail
+
+
+
+}
+
+else{
+sigmoid_max_estimate<-NA
+sigmoid_slopeParam_estimate<-NA
+sigmoid_midpoint_estimate<-NA
+sigmoid_h0_estimate<-NA
+decisionList$F_Flat_sigmoid_stat <- NA
+decisionList$F_Flat_sigmoid_p_value <- NA
+decisionList$lack_of_fit_sigmoid_stat <- NA
+decisionList$lack_of_fit_sigmoid_p_value <- NA
+decisionList$F_reject_sigmoid <- NA
+decisionList$sigmoid_classic_fail <- NA
+decisionList$sigmoid_lack_of_fit_fail <- NA
+decisionList$sigmoid_AIC_fail <- NA
+}
+
+# F-tests for double sigmoidal
+
+if(!is.null(parameterVectorDoubleSigmoidal)){
+ds_fitted_values<-doublesigmoidalFitFormula_h0(
+    x = dataInput$time,
+    maximum = parameterVectorDoubleSigmoidal$maximum_Estimate,
+
+    slope1Param =
+      parameterVectorDoubleSigmoidal$slope1Param_Estimate,
+
+    midPoint1Param =
+      parameterVectorDoubleSigmoidal$midPoint1Param_Estimate,
+
+    slope2Param=parameterVectorDoubleSigmoidal$slope2Param_Estimate,
+
+    midPointDistanceParam = parameterVectorDoubleSigmoidal$midPointDistanceParam_Estimate,
+
+    finalAsymptoteIntensityRatio=parameterVectorDoubleSigmoidal$finalAsymptoteIntensityRatio_Estimate,
+
+    h0=parameterVectorDoubleSigmoidal$h0_Estimate)
+
+ds_residuals<-dataInput$intensity-ds_fitted_values
+
+ds_df<-nrow(dataInput)-7
+
+flat_line<-mean(dataInput$intensity)
+
+flat_residuals<-dataInput$intensity-flat_line
+
+flat_df<-nrow(dataInput)-1
+
+Flat_ds_stat<-(((sum(flat_residuals^2)-sum(ds_residuals^2)))/(flat_df-ds_df))/(sum(ds_residuals^2)/ds_df)
+  
+
+F_Flat_ds_p_value<-pf(Flat_ds_stat,flat_df-ds_df,ds_df,lower.tail=FALSE)
+
+if(!is.null(F_Flat_ds_p_value)){
+if(F_Flat_ds_p_value>0.01){
+  F_reject_double<-1
+  double_classic_fail<-1
+}}
+
+
+
+
+
+pure_error_ds<-sum(ave(
+    dataInput$intensity,
+    dataInput$time,
+    FUN = function(x) (x - mean(x))^2))
+
+
+  ds_fitted_unique <- doublesigmoidalFitFormula_h0(
+    x = group_summary$time,
+    maximum = parameterVectorDoubleSigmoidal$maximum_Estimate,
+    slope1Param = parameterVectorDoubleSigmoidal$slope1Param_Estimate,
+    midPoint1Param = parameterVectorDoubleSigmoidal$midPoint1Param_Estimate,
+    slope2Param = parameterVectorDoubleSigmoidal$slope2Param_Estimate,
+    midPointDistanceParam = parameterVectorDoubleSigmoidal$midPointDistanceParam_Estimate,
+    finalAsymptoteIntensityRatio = parameterVectorDoubleSigmoidal$finalAsymptoteIntensityRatio_Estimate,
+    h0 = parameterVectorDoubleSigmoidal$h0_Estimate
+  )
+
+
+  lack_of_fit_2_ds<-sum(group_summary$reps*(ds_fitted_unique-group_summary$average)^2)
+
+  lack_of_fit_df_ds<-length(group_summary$time)-7
+  pure_error_df_ds<-nrow(dataInput)-length(group_summary$time)
+
+  lack_of_fit_ds_stat<-(lack_of_fit_2_ds/lack_of_fit_df_ds)/(pure_error_ds/ pure_error_df_ds)
+  lack_of_fit_ds_p_value <- pf(lack_of_fit_ds_stat, lack_of_fit_df_ds, pure_error_df_ds, lower.tail = FALSE)
+
+if(!is.null(lack_of_fit_ds_p_value)){
+if(lack_of_fit_ds_p_value<0.05){
+  F_reject_double<-1
+  double_lack_of_fit_fail<-1
+}}
+
+if(!is.null(parameterVectorDoubleSigmoidal)){
+if(parameterVectorDoubleSigmoidal$AIC>5){
+    double_AIC_fail<-1
+}}
+
+doubleSigmoidalModel.AIC<-parameterVectorDoubleSigmoidal$AIC
+ds_max_estimate<-parameterVectorDoubleSigmoidal$maximum_Estimate
+    ds_slope1Param_estimate<-parameterVectorDoubleSigmoidal$slope1Param_Estimate
+    ds_midPoint1Param_estimate<-parameterVectorDoubleSigmoidal$midPoint1Param_Estimate
+    ds_slope2Param_estimate<-parameterVectorDoubleSigmoidal$slope2Param_Estimate
+    ds_midPointDistanceParam_estimate<-parameterVectorDoubleSigmoidal$midPointDistanceParam_Estimate
+    ds_finalAsymptoteIntensityRatio_estimate<-parameterVectorDoubleSigmoidal$finalAsymptoteIntensityRatio_Estimate
+    ds_h0_estimate<-parameterVectorDoubleSigmoidal$h0_Estimate
+
+decisionList$Flat_ds_stat <- Flat_ds_stat
+decisionList$F_Flat_ds_p_value <- F_Flat_ds_p_value
+decisionList$lack_of_fit_ds_stat <- lack_of_fit_ds_stat
+decisionList$lack_of_fit_ds_p_value <- lack_of_fit_ds_p_value
+decisionList$F_reject_double <- F_reject_double
+decisionList$double_classic_fail <- double_classic_fail
+decisionList$double_lack_of_fit_fail <- double_lack_of_fit_fail
+decisionList$double_AIC_fail <- double_AIC_fail
+
+}
+
+else{F_reject_double<-1  
+ds_max_estimate<-NA
+ds_slope1Param_estimate<-NA
+ds_midPoint1Param_estimate<-NA
+ds_slope2Param_estimate<-NA
+ds_midPointDistanceParam_estimate<-NA
+ds_finalAsymptoteIntensityRatio_estimate<-NA
+ds_h0_estimate<-NA
+decisionList$Flat_ds_stat <- NA
+decisionList$F_Flat_ds_p_value <- NA
+decisionList$lack_of_fit_ds_stat <- NA
+decisionList$lack_of_fit_ds_p_value <- NA
+decisionList$F_reject_double <- NA
+decisionList$double_classic_fail <- NA
+decisionList$double_lack_of_fit_fail <- NA
+decisionList$double_AIC_fail <- NA
+
+}
+
+    decisionList$test.sm_modelCheck <- parameterVectorSigmoidal$model == 
+        "sigmoidal"
+    decisionList$test.dsm_modelCheck <- parameterVectorDoubleSigmoidal$model == 
+        "doublesigmoidal"
+    test.timeRange <- parameterVectorSigmoidal$dataScalingParameters.timeRange == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.timeRange
+    if (test.timeRange) {
+        timeRange <- parameterVectorSigmoidal$dataScalingParameters.timeRange
+    }
+    test.intensityMin <- parameterVectorSigmoidal$dataScalingParameters.intensityMin == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.intensityMin
+    test.intensityMax <- parameterVectorSigmoidal$dataScalingParameters.intensityMax == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.intensityMax
+    if (test.intensityMax) {
+        intensityMax <- parameterVectorSigmoidal$dataScalingParameters.intensityMax
+    }
+    test.intensityRange <- parameterVectorSigmoidal$dataScalingParameters.intensityRange == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.intensityRange
+    if (test.intensityRange) {
+        intensityRange <- parameterVectorSigmoidal$dataScalingParameters.intensityRange
+    }
+    decisionList$test.dataScalingParameters <- test.timeRange & 
+        test.intensityMin & test.intensityMax & test.intensityRange
+    decisionList$intensityMaximum <- intensityMax
+    decisionList$threshold_minimum_for_intensity_maximum <- threshold_minimum_for_intensity_maximum
+    decisionList$test.minimum_for_intensity_maximum <- threshold_minimum_for_intensity_maximum < 
+        intensityMax
+    decisionList$intensityRange <- intensityRange
+    decisionList$threshold_intensity_range <- threshold_intensity_range
+    decisionList$test.intensity_range <- threshold_intensity_range < 
+        intensityRange
+    decisionList$test.sigmoidalFit <- parameterVectorSigmoidal$isThisaFit
+    decisionList$test.doublesigmoidalFit <- parameterVectorDoubleSigmoidal$isThisaFit
+    decisionList$test.sigmoidalAdditionalParameters <- parameterVectorSigmoidal$additionalParameters
+    decisionList$test.doublesigmoidalAdditionalParameters <- parameterVectorDoubleSigmoidal$additionalParameters
+    decisionList$threshold_AIC <- threshold_AIC
+    decisionList$sigmoidalAIC <- parameterVectorSigmoidal$AIC_value
+    decisionList$test.F_test_sigmoid <- F_reject_sigmoid==0
+    decisionList$doublesigmoidalAIC <- parameterVectorDoubleSigmoidal$AIC_value
+    decisionList$test.F_test_ds <- F_reject_double==0
+    decisionList$dsm_maximum_x <- parameterVectorDoubleSigmoidal$maximum_x
+    decisionList$timeRange <- timeRange
+    decisionList$test.dsm_maximum_x <- decisionList$dsm_maximum_x < 
+        timeRange
+    sm_intensity_at_tmax <- sicegar::sigmoidalFitFormula_h0(x = timeRange, 
+        maximum = parameterVectorSigmoidal$maximum_y, slopeParam = parameterVectorSigmoidal$slopeParam_Estimate, 
+        midPoint = parameterVectorSigmoidal$midPoint_Estimate, 
+        h0 = parameterVectorSigmoidal$h0_Estimate)
+    decisionList$sm_tmax_IntensityRatio <- sm_intensity_at_tmax/parameterVectorSigmoidal$maximum_y
+    decisionList$threshold_sm_tmax_IntensityRatio <- threshold_sm_tmax_IntensityRatio
+    decisionList$test.sm_tmax_IntensityRatio <- decisionList$sm_tmax_IntensityRatio > 
+        threshold_sm_tmax_IntensityRatio
+    dsm_intensity_at_tmax <- sicegar::doublesigmoidalFitFormula_h0(x = timeRange, 
+        finalAsymptoteIntensityRatio = parameterVectorDoubleSigmoidal$finalAsymptoteIntensityRatio_Estimate, 
+        maximum = parameterVectorDoubleSigmoidal$maximum_y, slope1Param = parameterVectorDoubleSigmoidal$slope1Param_Estimate, 
+        midPoint1Param = parameterVectorDoubleSigmoidal$midPoint1Param_Estimate, 
+        slope2Param = parameterVectorDoubleSigmoidal$slope2Param_Estimate, 
+        midPointDistanceParam = parameterVectorDoubleSigmoidal$midPointDistanceParam_Estimate, 
+        h0 = parameterVectorDoubleSigmoidal$h0_Estimate)
+    decisionList$dsm_tmax_IntensityRatio <- dsm_intensity_at_tmax/parameterVectorDoubleSigmoidal$maximum_y
+    decisionList$threshold_dsm_tmax_IntensityRatio <- threshold_dsm_tmax_IntensityRatio
+    decisionList$test.dsm_tmax_IntensityRatio <- decisionList$dsm_tmax_IntensityRatio < 
+        threshold_dsm_tmax_IntensityRatio
+    decisionList$sm_startPoint_x <- parameterVectorSigmoidal$startPoint_x
+    decisionList$test.sm_startPoint_x <- parameterVectorSigmoidal$startPoint_x > 
+        0
+    decisionList$dsm_startPoint_x <- parameterVectorDoubleSigmoidal$startPoint_x
+    decisionList$test.dsm_startPoint_x <- parameterVectorDoubleSigmoidal$startPoint_x > 
+        0
+    decisionList$sm_startIntensity <- sicegar::sigmoidalFitFormula_h0(x = 0, 
+        maximum = parameterVectorSigmoidal$maximum_y, slopeParam = parameterVectorSigmoidal$slopeParam_Estimate, 
+        midPoint = parameterVectorSigmoidal$midPoint_Estimate, 
+        h0 = parameterVectorSigmoidal$h0_Estimate)
+    decisionList$threshold_t0_max_int <- threshold_t0_max_int
+    decisionList$test.sm_startIntensity <- decisionList$sm_startIntensity < 
+        threshold_t0_max_int
+    decisionList$dsm_startIntensity <- sicegar::doublesigmoidalFitFormula_h0(x = 0, 
+        finalAsymptoteIntensityRatio = parameterVectorDoubleSigmoidal$finalAsymptoteIntensityRatio_Estimate, 
+        maximum = parameterVectorDoubleSigmoidal$maximum_y, slope1Param = parameterVectorDoubleSigmoidal$slope1Param_Estimate, 
+        midPoint1Param = parameterVectorDoubleSigmoidal$midPoint1Param_Estimate, 
+        slope2Param = parameterVectorDoubleSigmoidal$slope2Param_Estimate, 
+        midPointDistanceParam = parameterVectorDoubleSigmoidal$midPointDistanceParam_Estimate, 
+        h0 = parameterVectorDoubleSigmoidal$h0_Estimate)
+    decisionList$test.dsm_startIntensity <- decisionList$dsm_startIntensity < 
+        threshold_t0_max_int
+    if (!is.na(decisionList$test.name)) {
+        if (!decisionList$test.name) {
+            stop("dataNames of sigmoidal and double-sigmoidal fits must be same")
+        }
+    }
+    if (!decisionList$test.sm_modelCheck) {
+        stop("provided sigmoidal model must be fitted by sicegar::sigmoidalFitFunction()")
+    }
+    if (!decisionList$test.dsm_modelCheck) {
+        stop("provided double_sigmoidal model must be fitted by sicegar::doublesigmoidalFitFunction()")
+    }
+    if (!decisionList$test.dataScalingParameters) {
+        stop("data scaling parameters of provided sigmoidal and double_sigmoidal parameterVectors must be same")
+    }
+    if (!decisionList$test.sigmoidalAdditionalParameters) {
+        stop("additional parameters for sigmoidal fit must be calculated")
+    }
+    if (!decisionList$test.doublesigmoidalAdditionalParameters) {
+        stop("additional parameters for double_sigmoidal fit must be calculated")
+    }
+    choices <- c("no_signal", "sigmoidal", "double_sigmoidal", 
+        "ambiguous")
+    decisionSteps <- c()
+    if (!decisionList$test.minimum_for_intensity_maximum) {
+        decisionSteps <- c(decisionSteps, "1a")
+        choices <- setdiff(choices, c("sigmoidal", "double_sigmoidal", 
+            "ambiguous"))
+    }
+    if (!decisionList$test.minimum_for_intensity_maximum) {
+        decisionSteps <- c(decisionSteps, "1b")
+        choices <- setdiff(choices, c("sigmoidal", "double_sigmoidal", 
+            "ambiguous"))
+    }
+    if (!setequal(choices, c("no_signal"))) {
+        decisionSteps <- c(decisionSteps, "1c")
+        choices <- setdiff(choices, c("no_signal"))
+    }
+    if (!decisionList$test.sigmoidalFit) {
+        decisionSteps <- c(decisionSteps, "2a")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (!decisionList$test.sigmoidalFit) {
+        decisionSteps <- c(decisionSteps, "2b")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.F_test_sigmoid) {
+        decisionSteps <- c(decisionSteps, "3a")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (!decisionList$test.F_test_ds) {
+        decisionSteps <- c(decisionSteps, "3b")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.sm_startPoint_x) {
+        decisionSteps <- c(decisionSteps, "4a")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (!decisionList$test.dsm_startPoint_x) {
+        decisionSteps <- c(decisionSteps, "4b")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.dsm_tmax_IntensityRatio) {
+        decisionSteps <- c(decisionSteps, "6")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.sm_tmax_IntensityRatio) {
+        decisionSteps <- c(decisionSteps, "7")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (length(intersect(choices, c("sigmoidal", "double_sigmoidal"))) > 
+        0) {
+        decisionSteps <- c(decisionSteps, "8")
+        choices <- setdiff(choices, c("ambiguous"))
+    }
+    if (length(intersect(choices, c("sigmoidal", "double_sigmoidal"))) == 
+        2) {
+        decisionSteps <- c(decisionSteps, "9")
+        if (decisionList$sigmoidalAIC + threshold_bonus_sigmoidal_AIC < 
+            decisionList$doublesigmoidalAIC) {
+            choices <- setdiff(choices, c("double_sigmoidal"))
+        }
+        if (decisionList$sigmoidalAIC + threshold_bonus_sigmoidal_AIC > 
+            decisionList$doublesigmoidalAIC) {
+            choices <- setdiff(choices, c("sigmoidal"))
+        }
+    }
+    if (!length(choices) == 1) {
+        stop("At this point length of choice must be 1")
+    }
+    decisionList$decisionSteps <- paste0(decisionSteps, collapse = "_")
+    decisionList$decision <- paste0(choices, collapse = "_")
+    if (showDetails) {
+        utils::str(decisionList)
+    }
+
+   print(alternative_lack_of_fit)
+   print(lack_of_fit_2)
+
+    return(data.frame(decisionList))
+}
+
+```
+
+# OG categorize
+```{r}
+categorize_h0_og <- function (dataInput,parameterVectorSigmoidal, parameterVectorDoubleSigmoidal, 
+    threshold_intensity_range = 0.1, threshold_minimum_for_intensity_maximum = 0.3, 
+    threshold_bonus_sigmoidal_AIC = 0, threshold_sm_tmax_IntensityRatio = 0.85, 
+    threshold_dsm_tmax_IntensityRatio = 0.75, threshold_AIC = -10, 
+    threshold_t0_max_int = 1e+10, showDetails = FALSE) 
+{
+    decisionList <- list()
+    if ((!is.na(parameterVectorSigmoidal$dataInputName)) & (!is.na(parameterVectorDoubleSigmoidal$dataInputName))) {
+        decisionList$test.name <- parameterVectorSigmoidal$dataInputName == 
+            parameterVectorDoubleSigmoidal$dataInputName
+        decisionList$dataInputName <- as.vector(parameterVectorSigmoidal$dataInputName)
+    }
+    else {
+        decisionList$test.name <- NA
+        decisionList$dataInputName <- NA
+    }
+    decisionList$test.sm_modelCheck <- parameterVectorSigmoidal$model == 
+        "sigmoidal"
+    decisionList$test.dsm_modelCheck <- parameterVectorDoubleSigmoidal$model == 
+        "doublesigmoidal"
+    test.timeRange <- parameterVectorSigmoidal$dataScalingParameters.timeRange == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.timeRange
+    if (test.timeRange) {
+        timeRange <- parameterVectorSigmoidal$dataScalingParameters.timeRange
+    }
+    test.intensityMin <- parameterVectorSigmoidal$dataScalingParameters.intensityMin == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.intensityMin
+    test.intensityMax <- parameterVectorSigmoidal$dataScalingParameters.intensityMax == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.intensityMax
+    if (test.intensityMax) {
+        intensityMax <- parameterVectorSigmoidal$dataScalingParameters.intensityMax
+    }
+    test.intensityRange <- parameterVectorSigmoidal$dataScalingParameters.intensityRange == 
+        parameterVectorDoubleSigmoidal$dataScalingParameters.intensityRange
+    if (test.intensityRange) {
+        intensityRange <- parameterVectorSigmoidal$dataScalingParameters.intensityRange
+    }
+    decisionList$test.dataScalingParameters <- test.timeRange & 
+        test.intensityMin & test.intensityMax & test.intensityRange
+    decisionList$intensityMaximum <- intensityMax
+    decisionList$threshold_minimum_for_intensity_maximum <- threshold_minimum_for_intensity_maximum
+    decisionList$test.minimum_for_intensity_maximum <- threshold_minimum_for_intensity_maximum < 
+        intensityMax
+    decisionList$intensityRange <- intensityRange
+    decisionList$threshold_intensity_range <- threshold_intensity_range
+    decisionList$test.intensity_range <- threshold_intensity_range < 
+        intensityRange
+    decisionList$test.sigmoidalFit <- parameterVectorSigmoidal$isThisaFit
+    decisionList$test.doublesigmoidalFit <- parameterVectorDoubleSigmoidal$isThisaFit
+    decisionList$test.sigmoidalAdditionalParameters <- parameterVectorSigmoidal$additionalParameters
+    decisionList$test.doublesigmoidalAdditionalParameters <- parameterVectorDoubleSigmoidal$additionalParameters
+    decisionList$threshold_AIC <- threshold_AIC
+    decisionList$sigmoidalAIC <- parameterVectorSigmoidal$AIC_value
+    decisionList$test.sigmoidalAIC <- parameterVectorSigmoidal$AIC_value < 
+        threshold_AIC
+    decisionList$doublesigmoidalAIC <- parameterVectorDoubleSigmoidal$AIC_value
+    decisionList$test.doublesigmoidalAIC <- parameterVectorDoubleSigmoidal$AIC_value < 
+        threshold_AIC
+    decisionList$dsm_maximum_x <- parameterVectorDoubleSigmoidal$maximum_x
+    decisionList$timeRange <- timeRange
+    decisionList$test.dsm_maximum_x <- decisionList$dsm_maximum_x < 
+        timeRange
+    sm_intensity_at_tmax <- sicegar::sigmoidalFitFormula_h0(x = timeRange, 
+        maximum = parameterVectorSigmoidal$maximum_y, slopeParam = parameterVectorSigmoidal$slopeParam_Estimate, 
+        midPoint = parameterVectorSigmoidal$midPoint_Estimate, 
+        h0 = parameterVectorSigmoidal$h0_Estimate)
+    decisionList$sm_tmax_IntensityRatio <- sm_intensity_at_tmax/parameterVectorSigmoidal$maximum_y
+    decisionList$threshold_sm_tmax_IntensityRatio <- threshold_sm_tmax_IntensityRatio
+    decisionList$test.sm_tmax_IntensityRatio <- decisionList$sm_tmax_IntensityRatio > 
+        threshold_sm_tmax_IntensityRatio
+    dsm_intensity_at_tmax <- sicegar::doublesigmoidalFitFormula_h0(x = timeRange, 
+        finalAsymptoteIntensityRatio = parameterVectorDoubleSigmoidal$finalAsymptoteIntensityRatio_Estimate, 
+        maximum = parameterVectorDoubleSigmoidal$maximum_y, slope1Param = parameterVectorDoubleSigmoidal$slope1Param_Estimate, 
+        midPoint1Param = parameterVectorDoubleSigmoidal$midPoint1Param_Estimate, 
+        slope2Param = parameterVectorDoubleSigmoidal$slope2Param_Estimate, 
+        midPointDistanceParam = parameterVectorDoubleSigmoidal$midPointDistanceParam_Estimate, 
+        h0 = parameterVectorDoubleSigmoidal$h0_Estimate)
+    decisionList$dsm_tmax_IntensityRatio <- dsm_intensity_at_tmax/parameterVectorDoubleSigmoidal$maximum_y
+    decisionList$threshold_dsm_tmax_IntensityRatio <- threshold_dsm_tmax_IntensityRatio
+    decisionList$test.dsm_tmax_IntensityRatio <- decisionList$dsm_tmax_IntensityRatio < 
+        threshold_dsm_tmax_IntensityRatio
+    decisionList$sm_startPoint_x <- parameterVectorSigmoidal$startPoint_x
+    decisionList$test.sm_startPoint_x <- parameterVectorSigmoidal$startPoint_x > 
+        0
+    decisionList$dsm_startPoint_x <- parameterVectorDoubleSigmoidal$startPoint_x
+    decisionList$test.dsm_startPoint_x <- parameterVectorDoubleSigmoidal$startPoint_x > 
+        0
+    decisionList$sm_startIntensity <- sicegar::sigmoidalFitFormula_h0(x = 0, 
+        maximum = parameterVectorSigmoidal$maximum_y, slopeParam = parameterVectorSigmoidal$slopeParam_Estimate, 
+        midPoint = parameterVectorSigmoidal$midPoint_Estimate, 
+        h0 = parameterVectorSigmoidal$h0_Estimate)
+    decisionList$threshold_t0_max_int <- threshold_t0_max_int
+    decisionList$test.sm_startIntensity <- decisionList$sm_startIntensity < 
+        threshold_t0_max_int
+    decisionList$dsm_startIntensity <- sicegar::doublesigmoidalFitFormula_h0(x = 0, 
+        finalAsymptoteIntensityRatio = parameterVectorDoubleSigmoidal$finalAsymptoteIntensityRatio_Estimate, 
+        maximum = parameterVectorDoubleSigmoidal$maximum_y, slope1Param = parameterVectorDoubleSigmoidal$slope1Param_Estimate, 
+        midPoint1Param = parameterVectorDoubleSigmoidal$midPoint1Param_Estimate, 
+        slope2Param = parameterVectorDoubleSigmoidal$slope2Param_Estimate, 
+        midPointDistanceParam = parameterVectorDoubleSigmoidal$midPointDistanceParam_Estimate, 
+        h0 = parameterVectorDoubleSigmoidal$h0_Estimate)
+    decisionList$test.dsm_startIntensity <- decisionList$dsm_startIntensity < 
+        threshold_t0_max_int
+    if (!is.na(decisionList$test.name)) {
+        if (!decisionList$test.name) {
+            stop("dataNames of sigmoidal and double-sigmoidal fits must be same")
+        }
+    }
+    if (!decisionList$test.sm_modelCheck) {
+        stop("provided sigmoidal model must be fitted by sicegar::sigmoidalFitFunction()")
+    }
+    if (!decisionList$test.dsm_modelCheck) {
+        stop("provided double_sigmoidal model must be fitted by sicegar::doublesigmoidalFitFunction()")
+    }
+    if (!decisionList$test.dataScalingParameters) {
+        stop("data scaling parameters of provided sigmoidal and double_sigmoidal parameterVectors must be same")
+    }
+    if (!decisionList$test.sigmoidalAdditionalParameters) {
+        stop("additional parameters for sigmoidal fit must be calculated")
+    }
+    if (!decisionList$test.doublesigmoidalAdditionalParameters) {
+        stop("additional parameters for double_sigmoidal fit must be calculated")
+    }
+    choices <- c("no_signal", "sigmoidal", "double_sigmoidal", 
+        "ambiguous")
+    decisionSteps <- c()
+    if (!decisionList$test.minimum_for_intensity_maximum) {
+        decisionSteps <- c(decisionSteps, "1a")
+        choices <- setdiff(choices, c("sigmoidal", "double_sigmoidal", 
+            "ambiguous"))
+    }
+    if (!decisionList$test.minimum_for_intensity_maximum) {
+        decisionSteps <- c(decisionSteps, "1b")
+        choices <- setdiff(choices, c("sigmoidal", "double_sigmoidal", 
+            "ambiguous"))
+    }
+    if (!setequal(choices, c("no_signal"))) {
+        decisionSteps <- c(decisionSteps, "1c")
+        choices <- setdiff(choices, c("no_signal"))
+    }
+    if (!decisionList$test.sigmoidalFit) {
+        decisionSteps <- c(decisionSteps, "2a")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (!decisionList$test.sigmoidalFit) {
+        decisionSteps <- c(decisionSteps, "2b")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.sigmoidalAIC) {
+        decisionSteps <- c(decisionSteps, "3a")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (!decisionList$test.doublesigmoidalAIC) {
+        decisionSteps <- c(decisionSteps, "3b")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.sm_startPoint_x) {
+        decisionSteps <- c(decisionSteps, "4a")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (!decisionList$test.dsm_startPoint_x) {
+        decisionSteps <- c(decisionSteps, "4b")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.dsm_tmax_IntensityRatio) {
+        decisionSteps <- c(decisionSteps, "6")
+        choices <- setdiff(choices, c("double_sigmoidal"))
+    }
+    if (!decisionList$test.sm_tmax_IntensityRatio) {
+        decisionSteps <- c(decisionSteps, "7")
+        choices <- setdiff(choices, c("sigmoidal"))
+    }
+    if (length(intersect(choices, c("sigmoidal", "double_sigmoidal"))) > 
+        0) {
+        decisionSteps <- c(decisionSteps, "8")
+        choices <- setdiff(choices, c("ambiguous"))
+    }
+    if (length(intersect(choices, c("sigmoidal", "double_sigmoidal"))) == 
+        2) {
+        decisionSteps <- c(decisionSteps, "9")
+        if (decisionList$sigmoidalAIC + threshold_bonus_sigmoidal_AIC < 
+            decisionList$doublesigmoidalAIC) {
+            choices <- setdiff(choices, c("double_sigmoidal"))
+        }
+        if (decisionList$sigmoidalAIC + threshold_bonus_sigmoidal_AIC > 
+            decisionList$doublesigmoidalAIC) {
+            choices <- setdiff(choices, c("sigmoidal"))
+        }
+    }
+    if (!length(choices) == 1) {
+        stop("At this point length of choice must be 1")
+    }
+    decisionList$decisionSteps <- paste0(decisionSteps, collapse = "_")
+    decisionList$decision <- paste0(choices, collapse = "_")
+    if (showDetails) {
+        utils::str(decisionList)
+    }
+
+
+    return(decisionList)
+}
+
+```
+
+# Test
+
+```{r}
+get_gene<-function(csv,gene){
+    csv|>
+        filter(geneName==gene)|>
+        select(time,intensity)
+}
+```
+
+```{r}
+decision<-function(data,gene,flipped=0){
+
+F_reject_sigmoid<-0
+F_reject_double<-0
+sigmoid_classic_fail<-0
+sigmoid_lack_of_fit_fail<-0
+double_classic_fail<-0
+double_lack_of_fit_fail<-0
+sigmoid_AIC_fail<-0
+double_AIC_fail<-0
+F_differs_from_AIC<-1
+
+graph_list<-list()
+
+
+if(flipped==0){
+dataInput<-get_gene(data,gene)}
+
+else{
+    dataInput<-data
+}
+
+group_summary<-dataInput|>
+  group_by(time)|>
+  summarise(average = mean(intensity),reps = n(),.groups = 'drop')
+
+normalizedInput <- normalizeData(dataInput = dataInput)
+
+
+sigmoidalModel <- tryCatch(multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "sigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+
+
+
+sigmoidalModel <-tryCatch(parameterCalculation_h0(sigmoidalModel),error=function(e) NULL)
+
+
+doubleSigmoidalModel<-tryCatch(multipleFitFunction_h0(dataInput = normalizedInput,
+                                          model = "doublesigmoidal",
+                                          n_runs_min = 20,
+                                          n_runs_max = 500,
+                                          showDetails = FALSE),error=function(e) NULL)
+
+doubleSigmoidalModel <- tryCatch(parameterCalculation_h0(doubleSigmoidalModel),error=function(e) NULL)
+
+if (is.null(sigmoidalModel)||is.null(doubleSigmoidalModel)){
+    if (isTRUE(flipped==0 && mean(dataInput$intensity[dataInput$time==0], na.rm=TRUE) > mean(dataInput$intensity[dataInput$time==max(dataInput$time, na.rm=TRUE)], na.rm=TRUE))){
+      dataInput$time<-max(dataInput$time, na.rm=TRUE)-dataInput$time
+      return(decision(dataInput,gene,flipped=1))
+    }
+    return(data.frame(
+      final_og.decision = "ambiguous",
+      final_new.decision = "failed_to_fit",
+      test.F_test_sigmoid = NA, test.F_test_ds = NA,
+      sigmoid_AIC = NA, ds_AIC = NA,
+      Flat_sigmoid_stat = NA, F_Flat_sigmoid_p_value = NA,
+      lack_of_fit_sigmoid_stat = NA, lack_of_fit_sigmoid_p_value = NA,
+      F_reject_sigmoid = NA, sigmoid_classic_fail = NA,
+      sigmoid_lack_of_fit_fail = NA, sigmoid_AIC_fail = NA,
+      Flat_ds_stat = NA, F_Flat_ds_p_value = NA,
+      lack_of_fit_ds_stat = NA, lack_of_fit_ds_p_value = NA,
+      F_reject_double = NA, double_classic_fail = NA,
+      double_lack_of_fit_fail = NA, double_AIC_fail = NA,
+      flipped = flipped
+    ))
+  }
+
+  if (is.null(sigmoidalModel)||is.null(doubleSigmoidalModel)){
+    return(data.frame(
+      final_og.decision = "ambiguous",
+      final_new.decision = "failed_to_fit",
+      test.F_test_sigmoid = NA, test.F_test_ds = NA,
+      sigmoid_AIC = NA, ds_AIC = NA,
+      Flat_sigmoid_stat = NA, F_Flat_sigmoid_p_value = NA,
+      lack_of_fit_sigmoid_stat = NA, lack_of_fit_sigmoid_p_value = NA,
+      F_reject_sigmoid = NA, sigmoid_classic_fail = NA,
+      sigmoid_lack_of_fit_fail = NA, sigmoid_AIC_fail = NA,
+      Flat_ds_stat = NA, F_Flat_ds_p_value = NA,
+      lack_of_fit_ds_stat = NA, lack_of_fit_ds_p_value = NA,
+      F_reject_double = NA, double_classic_fail = NA,
+      double_lack_of_fit_fail = NA, double_AIC_fail = NA,
+      flipped = flipped
+    ))
+  }
+
+
+final_og<-categorize_h0_og(dataInput,sigmoidalModel,doubleSigmoidalModel)
+
+
+final_new<-categorize_h0_new(dataInput,sigmoidalModel,doubleSigmoidalModel)
+
+if (isTRUE(mean(dataInput$intensity[dataInput$time == 0], na.rm=TRUE) > mean(dataInput$intensity[dataInput$time == max(dataInput$time, na.rm=TRUE)], na.rm=TRUE) && final_og$decision=='ambiguous')){
+dataInput$time<-max(dataInput$time, na.rm=TRUE)-dataInput$time
+flipped<-1
+return(decision(dataInput,gene,flipped=1))}
+
+
+if (isTRUE(mean(dataInput$intensity[dataInput$time == 0], na.rm=TRUE) > mean(dataInput$intensity[dataInput$time == max(dataInput$time, na.rm=TRUE)], na.rm=TRUE) && final_new$decision=='ambiguous')){
+dataInput$time<-max(dataInput$time, na.rm=TRUE)-dataInput$time
+flipped<-1
+return(decision(dataInput,gene,flipped=1))
+}
+
+
+if(isTRUE(final_og$decision==final_new$decision && final_og$decision=="sigmoidal")){
+fig_b<-figureModelCurves(dataInput = dataInput,
+                                  sigmoidalModel,
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s",final_og$decision))}
+
+if(isTRUE(final_og$decision==final_new$decision && final_og$decision=="double_sigmoidal")){
+    fig_b<-figureModelCurves(dataInput = dataInput,
+                                  doubleSigmoidalFitVector = doubleSigmoidalModel,
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s",final_og$decision))
+
+}
+
+
+if(isTRUE(final_og$decision==final_new$decision && final_og$decision=="ambiguous")){
+    fig_b<-figureModelCurves(dataInput = dataInput,
+                                  
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s",final_og$decision))
+
+}
+
+if(isTRUE(final_og$decision==final_new$decision && final_og$decision=="no signal")){
+    fig_b<-figureModelCurves(dataInput = dataInput,
+                                  
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s",final_og$decision))
+
+}
+
+if(isTRUE(final_og$decision!=final_new$decision && final_new$decision=="sigmoidal")){
+    fig_b<-figureModelCurves(dataInput = dataInput,
+                                  sigmoidalModel,
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s --> %s",final_og$decision,final_new$decision))
+
+}
+
+if(isTRUE(final_og$decision!=final_new$decision && final_new$decision=="double_sigmoidal")){
+    fig_b<-figureModelCurves(dataInput = dataInput,
+                                  doubleSigmoidalFitVector = doubleSigmoidalModel,
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s --> %s",final_og$decision,final_new$decision))
+
+}
+
+if(isTRUE(final_og$decision!=final_new$decision && final_new$decision=="ambiguous")){
+    fig_b<-figureModelCurves(dataInput = dataInput,
+                                  
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s --> %s",final_og$decision,final_new$decision))
+
+}
+
+if(isTRUE(final_og$decision!=final_new$decision && final_new$decision=="no signal")){
+    fig_b<-figureModelCurves(dataInput = dataInput,
+                                  
+                                  showParameterRelatedLines = TRUE,
+                                  use_h0=TRUE)+
+                                    labs(title=gene,subtitle=sprintf("%s --> %s",final_og$decision,final_new$decision))
+
+}
+
+
+results<-data.frame(final_og$decision,final_new$decision,final_new$test.F_test_sigmoid,final_new$test.F_test_ds,sigmoid_AIC=final_og$sigmoidalAIC,ds_AIC=final_og$doublesigmoidalAIC,
+final_new$Flat_sigmoid_stat,
+final_new$F_Flat_sigmoid_p_value,
+final_new$lack_of_fit_sigmoid_stat,
+final_new$lack_of_fit_sigmoid_p_value,
+final_new$F_reject_sigmoid,
+final_new$sigmoid_classic_fail,
+final_new$sigmoid_lack_of_fit_fail,
+final_new$sigmoid_AIC_fail,
+final_new$Flat_ds_stat,
+final_new$F_Flat_ds_p_value,
+final_new$lack_of_fit_ds_stat,
+final_new$lack_of_fit_ds_p_value,
+final_new$F_reject_double,
+final_new$double_classic_fail,
+final_new$double_lack_of_fit_fail,
+final_new$double_AIC_fail,
+flipped
+)
+
+return(list(results=results,graph=fig_b))
+
+}
+```
+
+```{r}
+decision(sp_data,'ycjY')
+```
+ycjY
+
+```{r}
+all_cold_genes<-unique(cold_data$geneName)
+some_genes<-c('ycjY','ycjW','ycjX')
+changes<-map(all_cold_genes,~decision(cold_data,.x))
+```
+
+```{r}
+pdf("different_decision_cold.pdf", width = 11, height = 8.5)
+
+for (i in changes) {
+  if (is.null(i)) next
+  
+  if (is.list(i) && !is.data.frame(i)) {
+    results <- i$results
+    graph   <- i$graph
+  } else if (is.data.frame(i)) {
+    results <- i
+    graph   <- NULL 
+  } else {
+    next
+  }
+  
+  if (!is.null(results) && nrow(results) > 0 && !is.null(graph)) {
+    if (isTRUE(results[1, 1] != results[1, 2])) {
+      print(graph)
+    }
+  }
+}
+
+dev.off()
+```
+
+```{r}
+all_sp_genes<-unique(sp_data$geneName)
+some_genes<-c('ycjY','ycjW','ycjX')
+changes_sp<-map(all_sp_genes,~decision(sp_data,.x))
+```
+
+```{r}
+pdf("different_decision_sp.pdf", width = 11, height = 8.5)
+
+for (i in changes_sp) {
+  if (is.null(i)) next
+  
+  if (is.list(i) && !is.data.frame(i)) {
+    results <- i$results 
+    graph   <- i$graph
+  } else if (is.data.frame(i)) {
+    results <- i
+    graph   <- NULL
+  } else {
+    next
+  }
+  
+  if (!is.null(results) && nrow(results) > 0 && !is.null(graph)) {
+    if (isTRUE(results[1, 1] != results[1, 2])) {
+      print(graph)
+    }
+  }
+}
+
+dev.off()
+```
+
+
+```{r}
+library(dplyr)
+library(purrr)
+
+cold_results <- bind_rows(compact(map(changes, ~ .x$results)))
+sp_results   <- bind_rows(compact(map(changes_sp, ~ .x$results)))
+
+cat("Cold Decisions\n")
+print(table(original= cold_results[[1]],new = cold_results[[2]]))
+
+cat("SP Decisions\n")
+print(table(original=sp_results[[1]], new= sp_results[[2]]))
+```
